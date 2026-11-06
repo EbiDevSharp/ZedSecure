@@ -1,0 +1,59 @@
+name: Aether Windows portable
+
+on:
+  push:
+    branches: [build/aether-windows-portable]
+    paths:
+      - '.github/workflows/windows-portable.yml'
+      - 'tools/package-windows-portable.ps1'
+      - 'desktop/**'
+      - 'shared/**'
+      - 'gradle/**'
+      - 'gradle.properties'
+      - 'tools/get-cores.sh'
+      - 'tools/get-aether.sh'
+      - 'tools/cores.txt'
+      - 'tools/aether-sha256.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-portable-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: '21' }
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          cache-read-only: false
+      - name: Download checksum-pinned Windows cores
+        shell: bash
+        run: ./tools/get-cores.sh windows
+      - name: Verify the Windows Aether CLI
+        shell: pwsh
+        run: |
+          $text = & .\desktop\src\main\resources\bin\windows\aether.exe help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0 -or $text -notmatch '--tls-verify') { throw 'Aether CLI smoke check failed' }
+      - name: Test and build a self-contained application directory
+        shell: pwsh
+        run: ./gradlew.bat --console=plain --max-workers=2 -Pkotlin.daemon.jvmargs=-Xmx6144m :desktop:test :desktop:createDistributable
+      - name: Package and check the extracted portable app
+        shell: pwsh
+        run: ./tools/package-windows-portable.ps1
+      - name: Upload the portable ZIP and validation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ZedSecure-Aether-Windows-Portable
+          path: |
+            dist/*
+            desktop/build/reports/tests/
+          retention-days: 14
