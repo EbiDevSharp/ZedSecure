@@ -77,20 +77,33 @@ if ($printed -and $printed.Trim() -ne "ZedSecure $version") { throw "Unexpected 
 
 $p = $null
 $opened = $false
+$candidates = @()
 try {
     $p = Start-Process -FilePath $exe -PassThru -WorkingDirectory $root -RedirectStandardOutput (Join-Path $out.FullName 'windows-gui-stdout.txt') -RedirectStandardError (Join-Path $out.FullName 'windows-gui-stderr.txt')
     $deadline = [DateTime]::UtcNow.AddSeconds(40)
     while ([DateTime]::UtcNow -lt $deadline) {
         $p.Refresh()
         if ($p.HasExited) { throw "The portable app exited before opening a window: $($p.ExitCode)" }
-        if ($p.MainWindowHandle -ne [IntPtr]::Zero) { $opened = $true; break }
+        # The jpackage launcher adjusts DLL search paths and starts a child copy.
+        # Its waiting parent owns a message-only window; the child owns the GUI.
+        $candidates = @($p) + @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($p.Id)" | ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue })
+        foreach ($candidate in $candidates) {
+            if (-not $candidate) { continue }
+            $candidate.Refresh()
+            if (-not $candidate.HasExited -and $candidate.MainWindowHandle -ne [IntPtr]::Zero -and $candidate.MainWindowTitle -eq 'ZedSecure') {
+                $opened = $true
+                break
+            }
+        }
+        if ($opened) { break }
         Start-Sleep -Milliseconds 500
     }
     if (-not $opened) {
         $p | Select-Object Id, ProcessName, HasExited, MainWindowHandle, MainWindowTitle | ConvertTo-Json | Set-Content (Join-Path $out.FullName 'windows-gui-process.json')
         Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -eq $p.Id -or $_.ParentProcessId -eq $p.Id } | Select-Object ProcessId, ParentProcessId, Name, CommandLine | ConvertTo-Json | Set-Content (Join-Path $out.FullName 'windows-gui-process-tree.json')
         try {
-            & (Join-Path $env:JAVA_HOME 'bin/jcmd.exe') $p.Id Thread.print 2>&1 | Out-File (Join-Path $out.FullName 'windows-gui-threads.txt') -Encoding utf8
+            $jvmProcess = $candidates | Where-Object { $_ -and -not $_.HasExited } | Select-Object -Last 1
+            & (Join-Path $env:JAVA_HOME 'bin/jcmd.exe') $jvmProcess.Id Thread.print 2>&1 | Out-File (Join-Path $out.FullName 'windows-gui-threads.txt') -Encoding utf8
         } catch { $_ | Out-File (Join-Path $out.FullName 'windows-gui-threads.txt') -Encoding utf8 }
         throw 'The portable application did not open a window'
     }
