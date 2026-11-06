@@ -86,7 +86,14 @@ try {
         if ($p.MainWindowHandle -ne [IntPtr]::Zero) { $opened = $true; break }
         Start-Sleep -Milliseconds 500
     }
-    if (-not $opened) { throw 'The portable application did not open a window' }
+    if (-not $opened) {
+        $p | Select-Object Id, ProcessName, HasExited, MainWindowHandle, MainWindowTitle | ConvertTo-Json | Set-Content (Join-Path $out.FullName 'windows-gui-process.json')
+        Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -eq $p.Id -or $_.ParentProcessId -eq $p.Id } | Select-Object ProcessId, ParentProcessId, Name, CommandLine | ConvertTo-Json | Set-Content (Join-Path $out.FullName 'windows-gui-process-tree.json')
+        try {
+            & (Join-Path $env:JAVA_HOME 'bin/jcmd.exe') $p.Id Thread.print 2>&1 | Out-File (Join-Path $out.FullName 'windows-gui-threads.txt') -Encoding utf8
+        } catch { $_ | Out-File (Join-Path $out.FullName 'windows-gui-threads.txt') -Encoding utf8 }
+        throw 'The portable application did not open a window'
+    }
 } finally {
     if ($p -and -not $p.HasExited) {
         Stop-Process -Id $p.Id -Force
