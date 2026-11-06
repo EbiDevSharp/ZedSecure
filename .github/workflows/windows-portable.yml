@@ -44,7 +44,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $text -notmatch '--tls-verify') { throw 'Aether CLI smoke check failed' }
       - name: Test and build a self-contained application directory
         shell: pwsh
-        run: ./gradlew.bat --console=plain --max-workers=2 -Pkotlin.daemon.jvmargs=-Xmx6144m :desktop:test :desktop:createDistributable
+        run: ./gradlew.bat --console=plain --max-workers=2 '-Pkotlin.daemon.jvmargs=-Xmx6144m' :desktop:test :desktop:createDistributable
       - name: Package and check the extracted portable app
         shell: pwsh
         run: ./tools/package-windows-portable.ps1
